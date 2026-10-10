@@ -325,6 +325,7 @@ def test_zone_editor_binds_unsaved_navigation_and_record_helpers_once():
     assert 'rememberLoadedRecords' in template
     assert '"deferRender": true' in template
     assert "url_for('domain.domain_records'" in template
+    assert 'getTableData(' not in template
     assert template.index('rememberLoadedRecords(this.api());') < template.index('setZoneRecordsReady();')
     assert 'recordsReady' not in template
     for action in ('button_add_record', 'button_apply_changes'):

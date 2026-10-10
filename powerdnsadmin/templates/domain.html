@@ -467,7 +467,18 @@
 
             // following unbind("click") is to avoid multiple times execution
             modal.find('#button_apply_confirm').unbind("click").click(function () {
-                var data = {'serial': serial, 'record': getTableData(table), '_csrf_token': '{{ csrf_token() }}'};
+                // Rows are raw text, so getTableData's HTML-entity decoding would corrupt them.
+                var records = table.rows().data().toArray().map(function (r) {
+                    return {
+                        record_name: r[0].trim(),
+                        record_type: r[1].trim(),
+                        record_status: r[2].trim(),
+                        record_ttl: r[3].trim(),
+                        record_data: r[4].trim(),
+                        record_comment: r[5].trim()
+                    };
+                });
+                var data = {'serial': serial, 'record': records, '_csrf_token': '{{ csrf_token() }}'};
                 applyRecordChanges(data, domain);
                 hideModal(modal);
             })
