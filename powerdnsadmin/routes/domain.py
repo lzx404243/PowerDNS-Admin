@@ -5,7 +5,6 @@ import traceback
 from flask import Blueprint, render_template, make_response, url_for, current_app, request, redirect, abort, jsonify, g, session
 from flask_login import login_required, current_user, login_manager
 
-from ..lib.record_rows import build_record_entries
 from ..lib.record_rows import build_record_rows
 from ..lib.utils import pretty_domain_name
 from ..lib.utils import to_idna
@@ -66,15 +65,6 @@ def domain(domain_name):
     reverse_records_allow_to_edit = Setting(
     ).get_supported_record_types(Setting().ZONE_TYPE_REVERSE)
     ttl_options = Setting().get_ttl_options()
-    # The page still embeds this list for detectUnsavedChanges(). The table
-    # itself is filled by domain_records(), one page at a time.
-    rrsets = Record().get_rrsets(domain.name)
-    if not rrsets and str(domain.type).lower() != 'slave':
-        abort(500)
-    records = build_record_entries(
-        rrsets,
-        Setting().get_records_allow_to_edit(),
-        Setting().get('pretty_ipv6_ptr'))
 
     if not re.search(r'ip6\.arpa|in-addr\.arpa$', domain_name):
         editable_records = forward_records_allow_to_edit
@@ -88,7 +78,6 @@ def domain(domain_name):
 
     return render_template('domain.html',
                            domain=domain,
-                           records=records,
                            editable_records=editable_records,
                            quick_edit=quick_edit,
                            ttl_options=ttl_options,

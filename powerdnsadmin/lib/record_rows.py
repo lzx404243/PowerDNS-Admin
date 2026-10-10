@@ -7,11 +7,7 @@ from ..models.record_entry import RecordEntry
 
 
 def build_record_entries(rrsets, allowed_types, pretty_ipv6):
-    """Flatten PowerDNS RRsets into zone-editor record entries.
-
-    The Ajax table and the original unsaved-changes script both use this
-    order, so a row index in the browser matches the script's snapshot.
-    """
+    """Flatten PowerDNS RRsets into zone-editor record entries, in table order."""
     entries = []
     for rrset in rrsets:
         if rrset['type'] not in allowed_types:

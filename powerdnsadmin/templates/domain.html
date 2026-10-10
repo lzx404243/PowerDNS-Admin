@@ -285,6 +285,7 @@
             },
             "deferRender": true,
             "initComplete": function () {
+                rememberLoadedRecords(this.api());
                 setZoneRecordsReady();
             },
             "createdRow": function (row) {
@@ -621,39 +622,38 @@
             });
         });
 
+        var loadedRecords = [];
+
+        function rememberLoadedRecords(table) {
+            loadedRecords = [];
+            table.rows().every(function (rowIdx) {
+                var data = this.data();
+                loadedRecords[rowIdx] = [data[0], data[1], data[2], String(data[3]), data[4], data[5]];
+            });
+        }
+
         function detectUnsavedChanges(table) {
-            // Reset unsavedChanges to false at the start of the function
+            // Same check as before: a row count change, or any saved row whose
+            // name, type, status, TTL, data, or comment differs from the loaded value.
             unsavedChanges = false;
             var index = 0;
-            var origcount = {{ records|length }};
+            var origcount = loadedRecords.length;
             var count = table.page.info().recordsTotal;
 
             if (count != origcount) {
-                unsavedChanges = true; //a record was either added or deleted.
+                unsavedChanges = true;
             } else {
-                {% for record in records %}
-                var origrecordname = '{{ (record.name,domain.name) | display_record_name }}';
-                var origrecordtype = '{{ record.type }}';
-                var origrecordstatus = '{{ record.status }}';
-                var origrecordttl = '{{ record.ttl }}';
-                var origrecorddata = '{{ record.data }}';
-                origrecorddata = origrecorddata.replace(/&#34;/g, '\"');
-                var origrecordcomment = '{{ record.comment }}';
-                if (!table.row(index) || typeof table.row(index) == 'undefined') {
-                    unsavedChanges = true; //sanity check otherwise below code throws error if row at that index doesn't exist.
-                } else {
-                    var editrecordname = table.row(index).data()[0];
-                    var editrecordtype = table.row(index).data()[1];
-                    var editrecordstatus = table.row(index).data()[2];
-                    var editrecordttl = table.row(index).data()[3];
-                    var editrecorddata = table.row(index).data()[4];
-                    var editrecordcomment = table.row(index).data()[5];
-                    if (origrecordname != editrecordname || origrecordtype != editrecordtype || origrecordstatus != editrecordstatus || origrecordttl != editrecordttl ||  origrecorddata != editrecorddata ||  origrecordcomment != editrecordcomment) {
+                for (var i = 0; i < loadedRecords.length; i++) {
+                    var orig = loadedRecords[i];
+                    var row = table.row(index);
+                    var data = row && row.data();
+                    if (!data) {
+                        unsavedChanges = true;
+                    } else if (orig[0] != data[0] || orig[1] != data[1] || orig[2] != data[2] || orig[3] != String(data[3]) || orig[4] != data[4] || orig[5] != data[5]) {
                         unsavedChanges = true;
                     }
+                    index++;
                 }
-                index++;
-                {% endfor %}
             }
             unsavedChangesWarning(unsavedChanges);
         }
