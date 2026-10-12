@@ -49,6 +49,7 @@ def _row_for_entry(entry, domain_name, include_comment):
     displayed_name = pretty_domain_name(
         display_record_name((entry.name, domain_name)))
     displayed_data = pretty_domain_name(entry.data)
+    # Order mirrors domain.html's DataTables columns and the former <td> layout.
     row = [
         displayed_name,
         entry.type,

@@ -244,6 +244,8 @@
         }
 
         function editZoneRow(oTable, nRow) {
+            // Fixes a pre-existing bug: editRow() leaves the cancel button in
+            // the wrong column; adjust/move it into the actions cell (column 6).
             editRow(oTable, nRow);
             var nodes = oTable.cells(nRow, '').nodes();
             var cancelButton = nodes[7] && nodes[7].querySelector('.button_cancel');
@@ -253,6 +255,8 @@
         }
 
         function saveZoneRow(oTable, nRow) {
+            // Mirrors shared saveRow(), but preserves this table's client-rendered
+            // Actions placeholder, new-row sort key, and full name for Changelog.
             var status = 'Disabled';
             var jqInputs = $(oTable.row(nRow).node()).find('input');
             var jqSelect = $(oTable.row(nRow).node()).find('select');
@@ -467,7 +471,11 @@
 
             // following unbind("click") is to avoid multiple times execution
             modal.find('#button_apply_confirm').unbind("click").click(function () {
-                // Rows are raw text, so getTableData's HTML-entity decoding would corrupt them.
+                // Ajax rows already contain the original raw record text, so
+                // read them directly from DataTables and map each column to the
+                // API fields. Do not use getTableData(), which HTML-decodes
+                // values and could change literal text such as "&amp;" into
+                // "&".
                 var records = table.rows().data().toArray().map(function (r) {
                     return {
                         record_name: r[0].trim(),
