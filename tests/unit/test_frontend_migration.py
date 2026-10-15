@@ -320,6 +320,21 @@ def test_zone_editor_binds_unsaved_navigation_and_record_helpers_once():
     warning_start = template.index('function unsavedChangesWarning(', detection_start)
     detection_function = template[detection_start:warning_start]
 
+    assert 'function markUnsavedChanges' not in template
+    assert '{% for record in records %}' not in template
+    assert 'rememberLoadedRecords' in template
+    assert '"deferRender": true' in template
+    assert "url_for('domain.domain_records'" in template
+    assert 'getTableData(' not in template
+    assert template.index('rememberLoadedRecords(this.api());') < template.index('setZoneRecordsReady();')
+    assert 'recordsReady' not in template
+    for action in ('button_add_record', 'button_apply_changes'):
+        class_at = template.index(action)
+        button = template[template.rindex('<button', 0, class_at):template.index('>', class_at)]
+        assert 'disabled' in button
+    update_at = template.index('button_update_from_primary')
+    update_button = template[template.rindex('<button', 0, update_at):template.index('>', update_at)]
+    assert 'disabled' not in update_button
     assert 'addEventListener' not in detection_function
     assert template.count("document.body.addEventListener('click'") == 1
     assert "event.target.closest('a.nav-link:not(.no-prompt)')" in template

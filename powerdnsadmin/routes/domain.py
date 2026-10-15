@@ -2,13 +2,11 @@ import re
 import json
 import datetime
 import traceback
-import dns.name
-import dns.reversename
 from flask import Blueprint, render_template, make_response, url_for, current_app, request, redirect, abort, jsonify, g, session
 from flask_login import login_required, current_user, login_manager
 
+from ..lib.record_rows import build_record_rows
 from ..lib.utils import pretty_domain_name
-from ..lib.utils import pretty_json
 from ..lib.utils import to_idna
 from ..decorators import can_create_domain, operator_role_required, can_access_domain, can_configure_dnssec, can_remove_domain
 from ..models.user import User, Anonymous
@@ -17,7 +15,6 @@ from ..models.setting import Setting
 from ..models.history import History
 from ..models.domain import Domain
 from ..models.record import Record
-from ..models.record_entry import RecordEntry
 from ..models.domain_template import DomainTemplate
 from ..models.domain_template_record import DomainTemplateRecord
 from ..models.domain_setting import DomainSetting
@@ -62,62 +59,12 @@ def domain(domain_name):
     if not domain:
         abort(404)
 
-    # Query domain's rrsets from PowerDNS API
-    rrsets = Record().get_rrsets(domain.name)
-    current_app.logger.debug("Fetched rrsets: \n{}".format(pretty_json(rrsets)))
-
-    # API server might be down, misconfigured
-    if not rrsets and str(domain.type).lower() != 'slave':
-        abort(500)
-
     quick_edit = Setting().get('record_quick_edit')
-    records_allow_to_edit = Setting().get_records_allow_to_edit()
     forward_records_allow_to_edit = Setting(
     ).get_supported_record_types(Setting().ZONE_TYPE_FORWARD)
     reverse_records_allow_to_edit = Setting(
     ).get_supported_record_types(Setting().ZONE_TYPE_REVERSE)
     ttl_options = Setting().get_ttl_options()
-    records = []
-
-    # Render the "records" to display in HTML datatable
-    #
-    # BUG: If we have multiple records with the same name
-    # and each record has its own comment, the display of
-    # [record-comment] may not consistent because PDNS API
-    # returns the rrsets (records, comments) has different
-    # order than its database records.
-    # TODO:
-    #   - Find a way to make it consistent, or
-    #   - Only allow one comment for that case
-    pretty_v6 = Setting().get('pretty_ipv6_ptr')
-    for r in rrsets:
-        if r['type'] in records_allow_to_edit:
-            r_name = r['name'].rstrip('.')
-
-            # If it is reverse zone and pretty_ipv6_ptr setting
-            # is enabled, we reformat the name for ipv6 records.
-            if pretty_v6 and r['type'] == 'PTR' and 'ip6.arpa' in r_name and '*' not in r_name:
-                r_name = dns.reversename.to_address(
-                    dns.name.from_text(r_name))
-
-            # Create the list of records in format that
-            # PDA jinja2 template can understand.
-            index = 0
-            for record in r['records']:
-                if (len(r['comments'])>index):
-                    c=r['comments'][index]['content']
-                else:
-                    c=''
-                record_entry = RecordEntry(
-                    name=r_name,
-                    type=r['type'],
-                    status='Disabled' if record['disabled'] else 'Active',
-                    ttl=r['ttl'],
-                    data=record['content'],
-                    comment=c,
-                    is_allowed_edit=True)
-                index += 1
-                records.append(record_entry)
 
     if not re.search(r'ip6\.arpa|in-addr\.arpa$', domain_name):
         editable_records = forward_records_allow_to_edit
@@ -131,7 +78,6 @@ def domain(domain_name):
 
     return render_template('domain.html',
                            domain=domain,
-                           records=records,
                            editable_records=editable_records,
                            quick_edit=quick_edit,
                            ttl_options=ttl_options,
@@ -139,6 +85,28 @@ def domain(domain_name):
                            catalog_members=catalog_members,
                            domain_name_safe=urllib.parse.quote_plus(domain_name),
                            allow_user_view_history=Setting().get('allow_user_view_history'))
+
+
+@domain_bp.route('/<path:domain_name>/records', methods=['GET'])
+@login_required
+@can_access_domain
+def domain_records(domain_name):
+    domain = Domain.query.filter(Domain.name == domain_name).first()
+    if not domain:
+        abort(404)
+
+    rrsets = Record().get_rrsets(domain.name)
+    if not rrsets and str(domain.type).lower() != 'slave':
+        abort(500)
+
+    include_comment = domain.type != 'Slave'
+    rows = build_record_rows(
+        rrsets,
+        domain.name,
+        Setting().get_records_allow_to_edit(),
+        Setting().get('pretty_ipv6_ptr'),
+        include_comment)
+    return jsonify(data=rows)
 
 
 @domain_bp.route('/remove', methods=['GET', 'POST'])
