@@ -422,7 +422,6 @@
             showModal(modal);
 
             $("#button_delete_confirm").unbind().one('click', function (e) {
-                // Read this row's tracking id before remove() drops the row.
                 trackRowDeletion(table, nRow);
                 table.row(nRow).remove().draw();
                 hideModal(modal);
@@ -548,7 +547,8 @@
         $(document.body).on("click", ".button_save", function (e) {
             e.stopPropagation();
             var table = $("#tbl_records").DataTable();
-            // Remembers the saved row's index, whose data carries the tracking id.
+            // Before redraw invalidates nEditing, remembers the saved row's
+            // stable DataTables row index.
             var savedRowIndex = table.row(nEditing).index();
             saveZoneRow(table, nEditing);
             markSavedRow(table, savedRowIndex);
@@ -667,9 +667,9 @@
         var nextTrackingId = 1;
         // Sentinel value to distinguish a newly-added row from a row that exists in the server.
         var NEW_ROW = null;
-        // tracking ID -> original values from server. Value can either be
-        // NEW_ROW, or the server values captured the first time a loaded row is
-        // edited.
+        // Maps tracking ID -> original values from server. Value can either be
+        // NEW_ROW, or the original values from server(captured the first time a
+        // loaded row is edited).
         var originalRows = Object.create(null);
         // Tracking ids for newly-added rows and for loaded rows whose saved
         // values differ from the server. Essentially rows that have unsaved changes.
@@ -684,11 +684,6 @@
             // field becomes a string when the row is edited, so compare the
             // loaded TTL as a string. 
             return [data[0], data[1], data[2], String(data[3]), data[4], data[5]];
-        }
-
-        function fieldsMatch(left, right) {
-            return left[0] == right[0] && left[1] == right[1] && left[2] == right[2] &&
-                left[3] == right[3] && left[4] == right[4] && left[5] == right[5];
         }
 
         function rememberRowBeforeEdit(table, nRow) {
@@ -730,7 +725,10 @@
             var data = table.row(rowIndex).data();
             var trackingId = data._trackingId;
             var original = originalRows[trackingId];
-            if (Array.isArray(original) && fieldsMatch(original, comparableFields(data))) {
+            var current = comparableFields(data);
+            if (Array.isArray(original) && original.every(function (value, index) {
+                return value == current[index];
+            })) {
                 // If the new saved values match the original values, the row is not dirty anymore.
                 dirtyRows.delete(trackingId);
             } else {
@@ -741,7 +739,8 @@
         }
 
         function trackRowDeletion(table, nRow) {
-            // Call this before remove(), while the row data is still available.
+            // Update book-keeping state before removing the row and decide
+            // whether to show the unsaved changes banner.
             var data = table.row(nRow).data();
             var trackingId = data && data._trackingId;
             if (trackingId && originalRows[trackingId] === NEW_ROW) {
