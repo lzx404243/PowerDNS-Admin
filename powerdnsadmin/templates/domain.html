@@ -507,12 +507,24 @@
                 return;
             }
             // clear search first
-            $("#tbl_records").DataTable().search('').columns().search('').draw();
+            var table = $("#tbl_records").DataTable();
+            table.search('').columns().search('').draw();
 
-            // add new row
-            var default_type = records_allow_edit[0]
-            var nRow = jQuery('#tbl_records').dataTable().fnAddData(['', default_type, 'Active', String(window.ttl_options[0][0]), '', '', '', '0']);
-            editZoneRow($("#tbl_records").DataTable(), nRow);
+            // Bug fix: Keep the new row in the same <tr> form(rather than a row
+            // index) used by the click-to-edit handler, so it recognizes clicks
+            // within the row already being edited.
+            var default_type = records_allow_edit[0];
+            var nRow = table.row.add([
+                '',
+                default_type,
+                'Active',
+                String(window.ttl_options[0][0]),
+                '',
+                '',
+                '',
+                '0'
+            ]).draw(false).node();
+            editZoneRow(table, nRow);
             document.getElementById("edit-row-focus").focus();
             nEditing = nRow;
             nNew = true;
