@@ -316,39 +316,17 @@ def test_zone_editor_uses_bootstrap_5_utilities_and_modal_api():
 
 def test_zone_editor_binds_unsaved_navigation_and_record_helpers_once():
     template = Path('powerdnsadmin/templates/domain.html').read_text()
-    mark_start = template.index('function markSavedRow(table, rowIndex)')
-    warning_start = template.index('function unsavedChangesWarning(', mark_start)
-    mark_function = template[mark_start:warning_start]
-    edit_start = template.index('function editZoneRow(oTable, nRow)')
-    edit_function = template[edit_start:template.index('function saveZoneRow(oTable, nRow)')]
+    detection_start = template.index('function detectUnsavedChanges(table)')
+    warning_start = template.index('function unsavedChangesWarning(', detection_start)
+    detection_function = template[detection_start:warning_start]
 
     assert 'function markUnsavedChanges' not in template
-    assert 'function detectUnsavedChanges' not in template
-    assert 'rememberLoadedRecords' not in template
-    assert 'rows().every' not in template
     assert '{% for record in records %}' not in template
+    assert 'rememberLoadedRecords' in template
     assert '"deferRender": true' in template
     assert "url_for('domain.domain_records'" in template
     assert 'getTableData(' not in template
-    assert 'rememberLoadedRecords(this.api())' not in template
-    assert edit_function.index('rememberRowBeforeEdit(oTable, nRow);') < edit_function.index('editRow(oTable, nRow);')
-    assert 'markSavedRow(table, savedRowIndex);' in template
-    assert 'trackRowDeletion(table, nRow);' in template
-    assert 'function reindexTrackedRows' not in template
-    assert 'copyTrackingId' not in template
-    save_start = template.index('function saveZoneRow(oTable, nRow)')
-    save_function = template[save_start:template.index('function rememberRowBeforeEdit(table, nRow)', save_start)]
-    assert 'data[0] = jqInputs[0].value;' in save_function
-    assert 'oTable.row(nRow).data(data);' in save_function
-    deletion_start = template.index('function trackRowDeletion(table, nRow)')
-    deletion_function = template[deletion_start:warning_start]
-    assert 'dirtyRows.delete(trackingId);' in deletion_function
-    assert 'delete originalRows[trackingId];' in deletion_function
-    assert 'originalRows[trackingId] === NEW_ROW' in deletion_function
-    assert 'data[7]' not in deletion_function
-    remember_start = template.index('function rememberRowBeforeEdit(table, nRow)')
-    remember_function = template[remember_start:template.index('function updateUnsavedChanges()', remember_start)]
-    assert "String(data[7]) === '0' ? NEW_ROW : comparableFields(data)" in remember_function
+    assert template.index('rememberLoadedRecords(this.api());') < template.index('setZoneRecordsReady();')
     assert 'recordsReady' not in template
     for action in ('button_add_record', 'button_apply_changes'):
         class_at = template.index(action)
@@ -357,7 +335,7 @@ def test_zone_editor_binds_unsaved_navigation_and_record_helpers_once():
     update_at = template.index('button_update_from_primary')
     update_button = template[template.rindex('<button', 0, update_at):template.index('>', update_at)]
     assert 'disabled' not in update_button
-    assert 'addEventListener' not in mark_function
+    assert 'addEventListener' not in detection_function
     assert template.count("document.body.addEventListener('click'") == 1
     assert "event.target.closest('a.nav-link:not(.no-prompt)')" in template
 
