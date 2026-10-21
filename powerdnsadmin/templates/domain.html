@@ -246,6 +246,9 @@
         function editZoneRow(oTable, nRow) {
             // Fixes a pre-existing bug: editRow() leaves the cancel button in
             // the wrong column; adjust/move it into the actions cell (column 6).
+            // Before edit, remember the original values before the cells are
+            // replaced by input fields.
+            rememberRowBeforeEdit(oTable, nRow);
             editRow(oTable, nRow);
             var nodes = oTable.cells(nRow, '').nodes();
             var cancelButton = nodes[7] && nodes[7].querySelector('.button_cancel');
@@ -263,18 +266,21 @@
             if (jqSelect[1].value == 'false') {
                 status = 'Active';
             }
-            var previous = oTable.row(nRow).data();
-            oTable.row(nRow).data([
-                jqInputs[0].value,
-                jqSelect[0].value,
-                status,
-                String(jqSelect[2].value),
-                jqInputs[1].value,
-                jqInputs[2].value,
-                '',
-                nNew ? '0' : '1',
-                previous[8] || ''
-            ]);
+            // Update this array fields in place instead of replacing it, to
+            // preserve data._trackingId across edits and DataTables redraws, as
+            // it is stored as a custom property on the array rather than in a
+            // column. 
+            var data = oTable.row(nRow).data();
+            data[0] = jqInputs[0].value;
+            data[1] = jqSelect[0].value;
+            data[2] = status;
+            data[3] = String(jqSelect[2].value);
+            data[4] = jqInputs[1].value;
+            data[5] = jqInputs[2].value;
+            data[6] = '';
+            data[7] = nNew ? '0' : '1';
+            data[8] = data[8] || '';
+            oTable.row(nRow).data(data);
             oTable.draw(false);
         }
 
@@ -289,7 +295,6 @@
             },
             "deferRender": true,
             "initComplete": function () {
-                rememberLoadedRecords(this.api());
                 setZoneRecordsReady();
             },
             "createdRow": function (row) {
@@ -417,8 +422,8 @@
             showModal(modal);
 
             $("#button_delete_confirm").unbind().one('click', function (e) {
+                trackRowDeletion(table, nRow);
                 table.row(nRow).remove().draw();
-                detectUnsavedChanges(table);
                 hideModal(modal);
             });
 
@@ -501,12 +506,24 @@
                 return;
             }
             // clear search first
-            $("#tbl_records").DataTable().search('').columns().search('').draw();
+            var table = $("#tbl_records").DataTable();
+            table.search('').columns().search('').draw();
 
-            // add new row
-            var default_type = records_allow_edit[0]
-            var nRow = jQuery('#tbl_records').dataTable().fnAddData(['', default_type, 'Active', String(window.ttl_options[0][0]), '', '', '', '0']);
-            editZoneRow($("#tbl_records").DataTable(), nRow);
+            // Bug fix: Keep the new row in the same <tr> form(rather than a row
+            // index) used by the click-to-edit handler, so it recognizes clicks
+            // within the row already being edited.
+            var default_type = records_allow_edit[0];
+            var nRow = table.row.add([
+                '',
+                default_type,
+                'Active',
+                String(window.ttl_options[0][0]),
+                '',
+                '',
+                '',
+                '0'
+            ]).draw(false).node();
+            editZoneRow(table, nRow);
             document.getElementById("edit-row-focus").focus();
             nEditing = nRow;
             nNew = true;
@@ -530,8 +547,11 @@
         $(document.body).on("click", ".button_save", function (e) {
             e.stopPropagation();
             var table = $("#tbl_records").DataTable();
+            // Before redraw invalidates nEditing, remembers the saved row's
+            // stable DataTables row index.
+            var savedRowIndex = table.row(nEditing).index();
             saveZoneRow(table, nEditing);
-            detectUnsavedChanges(table);
+            markSavedRow(table, savedRowIndex);
             nEditing = null;
             nNew = false;
         });
@@ -611,7 +631,7 @@
             });
         });
 
-        // Bind navigation protection once. detectUnsavedChanges() only updates
+        // Bind navigation protection once. updateUnsavedChanges() only updates
         // state, so repeated edits cannot register duplicate click handlers.
         document.body.addEventListener('click', function (event) {
             var link = event.target.closest('a.nav-link:not(.no-prompt)');
@@ -641,40 +661,101 @@
             });
         });
 
-        var loadedRecords = [];
+        // This is for tracking id generation. Tracking Ids are assigned only to
+        // rows the user edits. They are stored on the row data and are used to
+        // track unsaved changes.
+        var nextTrackingId = 1;
+        // Sentinel value to distinguish a newly-added row from a row that exists in the server.
+        var NEW_ROW = null;
+        // Maps tracking ID -> original values from server. Value can either be
+        // NEW_ROW, or the original values from server(captured the first time a
+        // loaded row is edited).
+        var originalRows = Object.create(null);
+        // Tracking ids for newly-added rows and for loaded rows whose saved
+        // values differ from the server. Essentially rows that have unsaved changes.
+        var dirtyRows = new Set();
+        // True after a row(that exists in the server) is deleted. 
+        var hasDeletedLoadedRows = false;
 
-        function rememberLoadedRecords(table) {
-            loadedRecords = [];
-            table.rows().every(function (rowIdx) {
-                var data = this.data();
-                loadedRecords[rowIdx] = [data[0], data[1], data[2], String(data[3]), data[4], data[5]];
-            });
+        function comparableFields(data) {
+            // Returns the user-editable comparable record fields(Name, type,
+            // status, TTL, data, and comment). Action markup, sort keys, and
+            // changelog metadata are intentionally excluded. Note that the TTL
+            // field becomes a string when the row is edited, so compare the
+            // loaded TTL as a string. 
+            return [data[0], data[1], data[2], String(data[3]), data[4], data[5]];
         }
 
-        function detectUnsavedChanges(table) {
-            // Same check as before: a row count change, or any saved row whose
-            // name, type, status, TTL, data, or comment differs from the loaded value.
-            unsavedChanges = false;
-            var index = 0;
-            var origcount = loadedRecords.length;
-            var count = table.page.info().recordsTotal;
+        function rememberRowBeforeEdit(table, nRow) {
+            // Save the original values from serverbefore the row becomes input
+            // fields. Editing it again must keep this first copy.
+            var data = table.row(nRow).data();
+            if (!data) {
+                return;
+            }
+            if (!data._trackingId) {
+                // Create the tracking id lazily. This is the only place a
+                // tracking id is created, as tracking is only needed for edited
+                // rows.
+                data._trackingId = nextTrackingId;
+                nextTrackingId += 1;
+            }
+            var trackingId = data._trackingId;
+            if (Object.hasOwn(originalRows, trackingId)) {
+                // Original values already tracked for this row.
+                return;
+            }
+            // Column 7 being "0" here means it's a edit of a row newly added in
+            // this session. In that case mark it as NEW_ROW for special
+            // handling. Otherwise, save the original values.
+            originalRows[trackingId] = String(data[7]) === '0' ? NEW_ROW :
+            comparableFields(data);
+        }
 
-            if (count != origcount) {
-                unsavedChanges = true;
+        function updateUnsavedChanges() {
+            // Derive the page-wide dirty flag and show the warning banner accordingly.
+            unsavedChanges = hasDeletedLoadedRows || dirtyRows.size > 0;
+            unsavedChangesWarning(unsavedChanges);
+        }
+
+        function markSavedRow(table, rowIndex) {
+            // Compare the new saved values with the original values from
+            // server, and mark the row as dirty only if they differ. This is
+            // called when a row is saved.
+            var data = table.row(rowIndex).data();
+            var trackingId = data._trackingId;
+            var original = originalRows[trackingId];
+            var current = comparableFields(data);
+            if (Array.isArray(original) && original.every(function (value, index) {
+                return value == current[index];
+            })) {
+                // If the new saved values match the original values, the row is not dirty anymore.
+                dirtyRows.delete(trackingId);
             } else {
-                for (var i = 0; i < loadedRecords.length; i++) {
-                    var orig = loadedRecords[i];
-                    var row = table.row(index);
-                    var data = row && row.data();
-                    if (!data) {
-                        unsavedChanges = true;
-                    } else if (orig[0] != data[0] || orig[1] != data[1] || orig[2] != data[2] || orig[3] != String(data[3]) || orig[4] != data[4] || orig[5] != data[5]) {
-                        unsavedChanges = true;
-                    }
-                    index++;
+                // If the new saved values differ from the original values, the row is dirty.
+                dirtyRows.add(trackingId);
+            }
+            updateUnsavedChanges();
+        }
+
+        function trackRowDeletion(table, nRow) {
+            // Update book-keeping state before removing the row and decide
+            // whether to show the unsaved changes banner.
+            var data = table.row(nRow).data();
+            var trackingId = data && data._trackingId;
+            if (trackingId && originalRows[trackingId] === NEW_ROW) {
+                // Removing a newly added row cancels the unsaved addition, so just remove it from the tracked rows.
+                delete originalRows[trackingId];
+                dirtyRows.delete(trackingId);
+            } else if (data) {
+                hasDeletedLoadedRows = true;
+                if (trackingId) {
+                    // For a previously edited row(with a tracked data), remove the tracked data as the row is being deleted. 
+                    delete originalRows[trackingId];
+                    dirtyRows.delete(trackingId);
                 }
             }
-            unsavedChangesWarning(unsavedChanges);
+            updateUnsavedChanges();
         }
 
         function unsavedChangesWarning(unsavedChanges) {
